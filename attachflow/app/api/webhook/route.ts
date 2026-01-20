@@ -12,18 +12,48 @@ const transporter = nodemailer.createTransporter({
   }
 });
 
+// Type for parsed AttachFlow data
+interface AttachFlowFieldData {
+  siteKey: string;
+  formId: string;
+  files: Array<{
+    id: string;
+    name: string;
+    size: number;
+  }>;
+}
+
+// Type for organized file attachments by field
+interface FilesByField {
+  [fieldName: string]: AttachFlowFieldData;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     
-    // Extract AttachFlow data if present
-    const attachFlowData = body._attachflow_files ? JSON.parse(body._attachflow_files) : null;
+    // Extract all AttachFlow fields (they start with _attachflow_)
+    const filesByField: FilesByField = {};
+    const formData: Record<string, unknown> = {};
     
-    // Remove AttachFlow internal field from form data
-    const formData = { ...body };
-    delete formData._attachflow_files;
+    for (const [key, value] of Object.entries(body)) {
+      if (key.startsWith('_attachflow_')) {
+        // Extract field name from _attachflow_{fieldName}
+        const fieldName = key.replace('_attachflow_', '');
+        try {
+          filesByField[fieldName] = JSON.parse(value as string);
+        } catch (e) {
+          console.error(`Failed to parse AttachFlow data for field ${fieldName}:`, e);
+        }
+      } else {
+        // Regular form field
+        formData[key] = value;
+      }
+    }
     
-    if (attachFlowData) {
+    const hasAttachments = Object.keys(filesByField).length > 0;
+    
+    if (hasAttachments) {
       // Get site configuration
       // TODO: Fetch from database based on siteKey
       const siteConfig = {
@@ -31,28 +61,49 @@ export async function POST(request: NextRequest) {
         siteName: 'Example Site'
       };
       
-      // Prepare email
-      const attachments = [];
+      // Prepare email attachments organized by field
+      const attachments: Array<{
+        filename: string;
+        content: Buffer;
+      }> = [];
       
-      // Get uploaded files
-      for (const fileInfo of attachFlowData.files) {
-        const fileMetadata = global.uploadedFiles?.get(fileInfo.id);
-        if (fileMetadata) {
-          try {
-            const fileBuffer = await readFile(fileMetadata.path);
-            attachments.push({
-              filename: fileMetadata.originalName,
-              content: fileBuffer
-            });
-          } catch (error) {
-            console.error('Error reading file:', error);
+      // Build file list HTML organized by field name
+      let filesHtml = '';
+      
+      for (const [fieldName, fieldData] of Object.entries(filesByField)) {
+        const fieldFiles: string[] = [];
+        
+        for (const fileInfo of fieldData.files) {
+          const fileMetadata = global.uploadedFiles?.get(fileInfo.id);
+          if (fileMetadata) {
+            try {
+              const fileBuffer = await readFile(fileMetadata.path);
+              // Prefix filename with field name for clarity
+              const prefixedFilename = `${fieldName}_${fileMetadata.originalName}`;
+              attachments.push({
+                filename: prefixedFilename,
+                content: fileBuffer
+              });
+              fieldFiles.push(fileMetadata.originalName);
+            } catch (error) {
+              console.error('Error reading file:', error);
+            }
           }
+        }
+        
+        if (fieldFiles.length > 0) {
+          filesHtml += `
+            <p><strong>${formatFieldName(fieldName)}:</strong></p>
+            <ul>
+              ${fieldFiles.map(f => `<li>${f}</li>`).join('')}
+            </ul>
+          `;
         }
       }
       
-      // Format form data for email
+      // Format regular form data for email
       const formDataHtml = Object.entries(formData)
-        .map(([key, value]) => `<p><strong>${key}:</strong> ${value}</p>`)
+        .map(([key, value]) => `<p><strong>${formatFieldName(key)}:</strong> ${value}</p>`)
         .join('');
       
       // Send email with attachments
@@ -63,7 +114,8 @@ export async function POST(request: NextRequest) {
         html: `
           <h2>New Form Submission</h2>
           ${formDataHtml}
-          <p><strong>Files attached:</strong> ${attachments.length}</p>
+          <h3>Uploaded Files (${attachments.length} total)</h3>
+          ${filesHtml || '<p>No files uploaded</p>'}
         `,
         attachments
       };
@@ -94,4 +146,11 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+// Helper to format field names for display (snake_case -> Title Case)
+function formatFieldName(fieldName: string): string {
+  return fieldName
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase());
 }
