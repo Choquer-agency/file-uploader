@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
 
     if (!file) {
       return NextResponse.json(
-        { error: 'No file uploaded' },
+        { error: 'No file uploadeds' },
         { status: 400 }
       );
     }
