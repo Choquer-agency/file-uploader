@@ -130,6 +130,12 @@
 
   // Upload file to AttachFlow
   async function uploadFile(file, formId) {
+    // Development mode: simulate upload if no site key
+    if (!ATTACHFLOW_SITE_KEY) {
+      console.warn('[AttachFlow] No site key - simulating upload for development');
+      return 'dev_' + generateId();
+    }
+    
     const formData = new FormData();
     formData.append('file', file);
     formData.append('siteKey', ATTACHFLOW_SITE_KEY);
@@ -148,7 +154,7 @@
       const data = await response.json();
       return data.fileId;
     } catch (error) {
-      console.error('AttachFlow upload error:', error);
+      console.error('[AttachFlow] Upload error:', error);
       throw error;
     }
   }
@@ -280,33 +286,47 @@
     });
   }
 
-  // Initialize uploaders from input[flow-upload="widget"] elements
+  // Initialize uploaders from elements with flow-upload="widget"
+  // Supports both:
+  //   <input flow-upload="widget" name="fieldName">
+  //   <div flow-upload="widget" flow-name="fieldName">
   function initUploaders() {
-    const inputs = document.querySelectorAll('input[flow-upload="widget"]');
+    const elements = document.querySelectorAll('[flow-upload="widget"]');
+    console.log(`[AttachFlow] Found ${elements.length} element(s) with flow-upload="widget"`);
     
-    inputs.forEach(input => {
+    elements.forEach((element, index) => {
       // Skip if already processed
-      if (input.dataset.attachflowProcessed) return;
-      input.dataset.attachflowProcessed = 'true';
+      if (element.dataset.attachflowProcessed) {
+        console.log(`[AttachFlow] Element #${index + 1} already processed, skipping`);
+        return;
+      }
+      element.dataset.attachflowProcessed = 'true';
       
-      const fieldName = input.name;
+      // Get field name with priority: flow-name > data-name > name
+      const fieldName = element.getAttribute('flow-name') 
+        || element.getAttribute('data-name') 
+        || element.name 
+        || element.getAttribute('name');
       if (!fieldName) {
-        console.warn('AttachFlow: Input missing name attribute, skipping', input);
+        console.warn('[AttachFlow] Element missing flow-name, data-name, or name attribute, skipping:', element);
         return;
       }
       
+      console.log(`[AttachFlow] Processing element #${index + 1}: "${fieldName}"`);
+      
       // Read configuration from attributes
       const config = {
-        buttonColor: input.getAttribute('flow-button-color') || DEFAULT_BUTTON_COLOR,
-        textColor: input.getAttribute('flow-text-color') || DEFAULT_TEXT_COLOR,
-        label: input.getAttribute('flow-label') || 'Upload files',
-        accept: input.getAttribute('flow-accept') || '*/*',
-        multiple: input.multiple !== false
+        buttonColor: element.getAttribute('flow-button-color') || DEFAULT_BUTTON_COLOR,
+        textColor: element.getAttribute('flow-text-color') || DEFAULT_TEXT_COLOR,
+        label: element.getAttribute('flow-label') || 'Upload files',
+        accept: element.getAttribute('flow-accept') || '*/*',
+        multiple: element.hasAttribute('multiple') || element.multiple !== false
       };
       
-      // Create widget and replace input
+      // Create widget and replace element
       const widget = createUploader(fieldName, config);
-      input.parentNode.replaceChild(widget, input);
+      element.parentNode.replaceChild(widget, element);
+      console.log(`[AttachFlow] Replaced element "${fieldName}" with upload widget`);
       
       // Find parent form and attach submit handler
       const form = widget.closest('form');
@@ -318,35 +338,41 @@
 
   // Initialize
   function init() {
+    console.log('[AttachFlow] Initializing...');
+    
     if (!ATTACHFLOW_SITE_KEY) {
-      console.error('AttachFlow: Site key not found. Please set window.ATTACHFLOW_SITE_KEY before loading this script.');
-      return;
+      console.warn('[AttachFlow] Site key not set. File uploads will not work until you set window.ATTACHFLOW_SITE_KEY');
     }
 
     addStyles();
     
     // Initialize uploaders on page load
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', initUploaders);
+      document.addEventListener('DOMContentLoaded', function() {
+        console.log('[AttachFlow] DOM ready, initializing uploaders...');
+        initUploaders();
+      });
     } else {
+      console.log('[AttachFlow] DOM already ready, initializing uploaders...');
       initUploaders();
     }
     
-    // Watch for dynamically added inputs
+    // Watch for dynamically added elements with flow-upload="widget"
     const observer = new MutationObserver(function(mutations) {
       let shouldInit = false;
       mutations.forEach(function(mutation) {
         mutation.addedNodes.forEach(function(node) {
           if (node.nodeType === 1) {
-            if (node.matches && node.matches('input[flow-upload="widget"]')) {
+            if (node.matches && node.matches('[flow-upload="widget"]')) {
               shouldInit = true;
-            } else if (node.querySelector && node.querySelector('input[flow-upload="widget"]')) {
+            } else if (node.querySelector && node.querySelector('[flow-upload="widget"]')) {
               shouldInit = true;
             }
           }
         });
       });
       if (shouldInit) {
+        console.log('[AttachFlow] New elements detected, reinitializing...');
         setTimeout(initUploaders, 100);
       }
     });
@@ -403,4 +429,5 @@
 
   // Start
   init();
+  console.log('[AttachFlow] Widget loaded successfully');
 })();
