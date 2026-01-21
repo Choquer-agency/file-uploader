@@ -11,7 +11,7 @@ async function ensureUploadDir() {
   try {
     await mkdir(UPLOAD_DIR, { recursive: true });
   } catch (error) {
-    console.error('Error creating upload directory:', error);
+    console.error('Error creating upload directories:', error);
   }
 }
 
